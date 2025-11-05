@@ -114,13 +114,9 @@ global hotkeyActions := Map(
 
 global settingsFile := EnvGet("LOCALAPPDATA") "\WinMacros\settings.ini"
 
-global currentVersion := "1.8"
+global currentVersion := "1.9"
 global versionCheckUrl := "https://winmacros.netlify.app/version/version.txt"
 global githubReleasesUrl := "https://github.com/fr0st-iwnl/WinMacros/releases/latest"
-
-global currentTheme := IniRead(settingsFile, "Settings", "Theme", "dark")
-global notificationsEnabled := IniRead(settingsFile, "Settings", "Notifications", "1") = "1"
-global animationsEnabled := IniRead(settingsFile, "Settings", "Animations", "0") = "1"
 
 global unifiedGui := ""
 global currentTabIndex := 1
@@ -150,6 +146,11 @@ global currentNotify := ""
 
 global launcherIniPath := EnvGet("LOCALAPPDATA") "\WinMacros\launcher.ini"
 global activeHotkeys := Map()
+global defaultLauncherIcon := "🚀"
+global notificationPreviewGui := ""
+global notificationPreviewMenu := ""
+global suppressNotificationPreviewMenu := false
+global notificationWidthApplyBtn := ""
 
 if !DirExist(EnvGet("LOCALAPPDATA") "\WinMacros") {
     DirCreate(EnvGet("LOCALAPPDATA") "\WinMacros")
@@ -166,13 +167,61 @@ if !FileExist(settingsFile) {
     IniWrite("dark", settingsFile, "Settings", "Theme")
     IniWrite(1, settingsFile, "Settings", "Notifications")
     IniWrite(0, settingsFile, "Settings", "Animations")
+    IniWrite("stack", settingsFile, "Settings", "NotificationStackMode")
+    IniWrite(300, settingsFile, "Settings", "NotificationWidth")
+    IniWrite("left", settingsFile, "Settings", "NotificationTextAlign")
 }
 
 global currentTheme := IniRead(settingsFile, "Settings", "Theme", "dark")
 global notificationsEnabled := IniRead(settingsFile, "Settings", "Notifications", "1") = "1"
+global animationsEnabled := IniRead(settingsFile, "Settings", "Animations", "0") = "1"
+global notificationTextAlign := StrLower(IniRead(settingsFile, "Settings", "NotificationTextAlign", "left"))
+if (notificationTextAlign != "center")
+    notificationTextAlign := "left"
+global notificationStackMode := StrLower(IniRead(settingsFile, "Settings", "NotificationStackMode", "stack"))
+if (notificationStackMode != "overlay")
+    notificationStackMode := "stack"
+global notificationWidth := IniRead(settingsFile, "Settings", "NotificationWidth", "300") + 0
+if (notificationWidth < 220 || notificationWidth > 600) {
+    notificationWidth := 300
+    IniWrite(notificationWidth, settingsFile, "Settings", "NotificationWidth")
+}
+global notificationPosX := IniRead(settingsFile, "Settings", "NotificationPosX", "")
+if (notificationPosX != "")
+    notificationPosX := notificationPosX + 0
+global notificationPosY := IniRead(settingsFile, "Settings", "NotificationPosY", "")
+if (notificationPosY != "")
+    notificationPosY := notificationPosY + 0
 
 if (currentTheme = "dark") {
     darkMode.SetMode(1)
+}
+
+EncodeLauncherIcon(iconText) {
+    if (iconText = "")
+        return ""
+    
+    encoded := ""
+    Loop Parse iconText {
+        encoded .= (A_Index > 1 ? "-" : "") Format("{:X}", Ord(A_LoopField))
+    }
+    return encoded
+}
+
+DecodeLauncherIcon(encodedIcon) {
+    if (encodedIcon = "")
+        return ""
+    
+    if RegExMatch(encodedIcon, "^(?:[0-9A-F]+)(?:-[0-9A-F]+)*$") {
+        icon := ""
+        for code in StrSplit(encodedIcon, "-") {
+            if (code != "")
+                icon .= Chr("0x" code)
+        }
+        return icon
+    }
+    
+    return encodedIcon
 }
 
 ; Function to hide focus borders in GUI controls [ex: unfocused textboxes, etc]
@@ -424,13 +473,11 @@ ToggleDesktopIcons(ThisHotkey) {
 
 ToggleMute(ThisHotkey) {
     try {
-        if (SoundGetName() = "") {
-            ShowNotification("❌ No audio device detected")
-            return
-        }
-        
         SoundSetMute(-1)
-        isMuted := SoundGetMute()
+        isMuted := ""
+        try isMuted := SoundGetMute()
+        if (isMuted = "")
+            isMuted := false
         ShowNotification(isMuted ? "🔇 Volume Muted" : "🔊 Volume Unmuted")
     } catch Error as err {
         ShowNotification("❌ No audio device detected")
@@ -439,13 +486,11 @@ ToggleMute(ThisHotkey) {
 
 ToggleMic(*) {
     try {
-        if (SoundGetName(, "Microphone") = "") {
-            ShowNotification("❌ No microphone detected")
-            return
-        }
-        
         SoundSetMute(-1, , "Microphone")
-        isMuted := SoundGetMute(, "Microphone")
+        isMuted := ""
+        try isMuted := SoundGetMute(, "Microphone")
+        if (isMuted = "")
+            isMuted := false
         ShowNotification(isMuted ? "🎤 Microphone Muted" : "🎤 Microphone Unmuted")
     } catch Error as err {
         ShowNotification("❌ No microphone detected")
@@ -484,14 +529,13 @@ OpenBrowser(*) {
 
 VolumeUp(*) {
     try {
-        if (SoundGetName() = "") {
-            ShowNotification("❌ No audio device detected")
-            return
-        }
-        
         SoundSetVolume("+5")
-        currentVol := SoundGetVolume()
-        ShowNotification("🔊 Volume: " Round(currentVol) "%")
+        currentVol := ""
+        try currentVol := SoundGetVolume()
+        if (currentVol != "")
+            ShowNotification("🔊 Volume: " Round(currentVol) "%")
+        else
+            ShowNotification("🔊 Volume adjusted")
     } catch Error as err {
         ShowNotification("❌ No audio device detected")
     }
@@ -499,14 +543,13 @@ VolumeUp(*) {
 
 VolumeDown(*) {
     try {
-        if (SoundGetName() = "") {
-            ShowNotification("❌ No audio device detected")
-            return
-        }
-        
         SoundSetVolume("-5")
-        currentVol := SoundGetVolume()
-        ShowNotification("🔉 Volume: " Round(currentVol) "%")
+        currentVol := ""
+        try currentVol := SoundGetVolume()
+        if (currentVol != "")
+            ShowNotification("🔉 Volume: " Round(currentVol) "%")
+        else
+            ShowNotification("🔉 Volume adjusted")
     } catch Error as err {
         ShowNotification("❌ No audio device detected")
     }
@@ -559,7 +602,8 @@ ShowNotification(message) {
 
 ShowNextNotification() {
     global notificationQueue, isShowingNotification, currentTheme, activeNotifications, animationsEnabled
-    
+    global notificationPosX, notificationPosY, notificationStackMode, notificationWidth
+
     if (notificationQueue.Length = 0) {
         isShowingNotification := false
         return
@@ -573,28 +617,49 @@ ShowNextNotification() {
     notify.SetFont("s10", "Segoe UI")
     notify.BackColor := currentTheme = "dark" ? "1A1A1A" : "F0F0F0"
     
-    MonitorGetWorkArea(, &left, &top, &right, &bottom)
+    width := notificationWidth
+    rows := 0
+    wrappedMessage := WrapNotificationMessage(message, width, &rows)
+    height := CalculateNotificationHeight(rows)
     
-    if (StrLen(message) > 40) {
-        height := 50
-        notify.Add("Text", "x10 y10 w280 r2 c" (currentTheme = "dark" ? "0xFFFFFF" : "0x000000"), message)
-    } else {
-        height := 35
-        notify.Add("Text", "x10 y10 w280 r1 c" (currentTheme = "dark" ? "0xFFFFFF" : "0x000000"), message)
-    }
+    textWidth := width - 20
+    if (textWidth < 60)
+        textWidth := 60
     
-    width := 300
-    xPos := right - width - 20
+    textOptions := "x10 y10 w" . textWidth . " r" . rows . " c" . (currentTheme = "dark" ? "0xFFFFFF" : "0x000000")
+    if (notificationTextAlign = "center")
+        textOptions .= " Center"
     
-    yPos := top + 20
-    for existingNotify in activeNotifications {
-        if (IsObject(existingNotify) && existingNotify.HasOwnProp("height")) {
-            yPos += existingNotify.height + 10
+    notify.Add("Text", textOptions, wrappedMessage)
+    
+    MonitorGet(, &left, &top, &right, &bottom)
+    
+    margin := 20
+    baseX := notificationPosX != "" ? notificationPosX : right - width - margin
+    baseY := notificationPosY != "" ? notificationPosY : top + margin
+    
+    ClampNotificationPosition(&baseX, &baseY, width, height, margin)
+    
+    xPos := baseX
+    yPos := baseY
+    
+    if (notificationStackMode = "stack") {
+        for existingNotify in activeNotifications {
+            if (IsObject(existingNotify) && existingNotify.HasOwnProp("height")) {
+                yPos += existingNotify.height + 10
+            }
         }
-    }
-    
-    if (isSpecial) {
-        yPos := top + 20
+        
+        if (isSpecial) {
+            yPos := baseY
+        }
+    } else {
+        for existingNotify in activeNotifications {
+            if (IsObject(existingNotify) && existingNotify.HasOwnProp("gui")) {
+                try existingNotify.gui.Destroy()
+            }
+        }
+        activeNotifications := []
     }
     
     notify.Show(Format("NoActivate x{1} y{2} w{3} h{4}", xPos, yPos, width, height))
@@ -605,7 +670,7 @@ ShowNextNotification() {
     
     activeNotifications.Push({gui: notify, height: height, text: message, isSpecial: isSpecial})
     
-    SetTimer(RemoveNotification.Bind(notify, xPos, top), -2000)
+    SetTimer(RemoveNotification.Bind(notify, xPos, baseY), -2000)
     
     if (notificationQueue.Length > 0) {
         notificationQueue.RemoveAt(1)
@@ -618,7 +683,116 @@ ShowNextNotification() {
     }
 }
 
-RemoveNotification(notify, xPos, topPos) {
+WrapNotificationMessage(message, width, &lineCount) {
+    text := StrReplace(message, "`r")
+    maxChars := Floor((width - 40) / 7)
+    if (maxChars < 12)
+        maxChars := 12
+    
+    lines := []
+    sections := StrSplit(text, "`n", , true)
+    
+    for section in sections {
+        if (section = "") {
+            lines.Push("")
+            continue
+        }
+        
+        current := ""
+        words := StrSplit(section, " ")
+        for word in words {
+            if (word = "")
+                continue
+            
+            pieces := BreakLongWord(word, maxChars)
+            for pieceIndex, piece in pieces {
+                isFirstPiece := (pieceIndex = 1)
+                if (current = "") {
+                    current := piece
+                } else if (StrLen(current) + (isFirstPiece ? 1 : 0) + StrLen(piece) <= maxChars) {
+                    if (isFirstPiece) {
+                        current .= " " piece
+                    } else {
+                        current .= piece
+                    }
+                } else {
+                    lines.Push(current)
+                    current := piece
+                }
+            }
+        }
+        
+        if (current != "")
+            lines.Push(current)
+    }
+    
+    if (lines.Length = 0)
+        lines.Push("")
+    
+    lineCount := lines.Length
+    
+    wrapped := ""
+    for idx, line in lines {
+        if (idx > 1)
+            wrapped .= "`n"
+        wrapped .= line
+    }
+    
+    return wrapped
+}
+
+BreakLongWord(word, maxChars) {
+    parts := []
+    chunkSize := Min(maxChars, 14)
+    if (StrLen(word) <= chunkSize) {
+        parts.Push(word)
+        return parts
+    }
+    
+    pos := 1
+    wordLen := StrLen(word)
+    while (pos <= wordLen) {
+        parts.Push(SubStr(word, pos, chunkSize))
+        pos += chunkSize
+    }
+    return parts
+}
+
+CalculateNotificationHeight(lineCount) {
+    if (lineCount < 1)
+        lineCount := 1
+    
+    return 35 + ((lineCount - 1) * 18)
+}
+
+ClampNotificationPosition(&x, &y, width, height, margin := 0) {
+    MonitorGet(, &left, &top, &right, &bottom)
+    
+    minX := left + margin
+    maxX := right - width - margin
+    minY := top + margin
+    maxY := bottom - height - margin
+    
+    if (maxX >= minX) {
+        if (x < minX)
+            x := minX
+        else if (x > maxX)
+            x := maxX
+    } else {
+        x := right - width - margin
+    }
+    
+    if (maxY >= minY) {
+        if (y < minY)
+            y := minY
+        else if (y > maxY)
+            y := maxY
+    } else {
+        y := top + margin
+    }
+}
+
+RemoveNotification(notify, xPos, baseY) {
     global activeNotifications, animationsEnabled
     
     ; Find and remove notification from active list
@@ -645,7 +819,7 @@ RemoveNotification(notify, xPos, topPos) {
     }
     
     ; Reposition remaining notifications
-    yPos := topPos + 20
+    yPos := baseY
     for i, notifyInfo in activeNotifications {
         try {
             ; Add safety checks for the notification info object
@@ -1531,7 +1705,11 @@ LoadLaunchersToListView(lv) {
                 path := parts[2]
                 name := IniRead(launcherIniPath, "Names", hotkey, hotkey)
                 readableHotkey := FormatHotkey(hotkey)
-                lv.Add(, name, readableHotkey, path)
+                iconEncoded := IniRead(launcherIniPath, "Icons", hotkey, "")
+                icon := DecodeLauncherIcon(iconEncoded)
+                if (icon = "" || icon = "??")
+                    icon := defaultLauncherIcon
+                lv.Add(, name, icon, readableHotkey, path)
             }
         }
     }
@@ -1555,6 +1733,10 @@ CreateLauncherHotkey(hotkeyStr, path) {
         }
         
         name := IniRead(launcherIniPath, "Names", hotkeyStr, path)
+        iconEncoded := IniRead(launcherIniPath, "Icons", hotkeyStr, "")
+        icon := DecodeLauncherIcon(iconEncoded)
+        if (icon = "" || icon = "??")
+            icon := defaultLauncherIcon
         
         ; Extract the executable name from the full path
         SplitPath(path, &exeName)
@@ -1562,7 +1744,7 @@ CreateLauncherHotkey(hotkeyStr, path) {
         ; Check if single instance mode is enabled for this launcher (default: 0 = allow multiple)
         singleInstance := IniRead(launcherIniPath, "SingleInstance", hotkeyStr, "0")
         
-        fn := (*) => LaunchOrActivate(path, exeName, name, singleInstance)
+        fn := (*) => LaunchOrActivate(path, exeName, name, singleInstance, icon)
         
         activeHotkeys[hotkeyStr] := fn
         
@@ -1576,7 +1758,7 @@ CreateLauncherHotkey(hotkeyStr, path) {
     }
 }
 
-LaunchOrActivate(appPath, exeName, appName, singleInstance := 0) {
+LaunchOrActivate(appPath, exeName, appName, singleInstance := 0, icon := "") {
     ; Check if single instance mode is enabled
     if (singleInstance = "1" && WinExist("ahk_exe " exeName)) {
         ; Application is running and single instance mode is on, activate it
@@ -1586,7 +1768,9 @@ LaunchOrActivate(appPath, exeName, appName, singleInstance := 0) {
         ; Either not running, or multiple instances allowed - launch new instance
         try {
             Run(appPath)
-            ShowNotification("🚀 Launching " appName)
+            if (icon = "")
+                icon := defaultLauncherIcon
+            ShowNotification(icon " Launching " appName)
         } catch Error as err {
             ShowNotification("❌ Failed to launch " appName)
         }
@@ -1841,11 +2025,11 @@ ResetAllHotkeysTab() {
 }
 
 CreateLauncherTab(gui, tabs) {
-    global currentTheme, launcherIniPath
+    global currentTheme, launcherIniPath, defaultLauncherIcon
     
     tabs.UseTab(3)
     
-    lv := gui.Add("ListView", "x20 y40 w730 h320 Grid -Multi NoSortHdr +LV0x10000 +HScroll +VScroll", ["Name", "Hotkey", "Path"])
+    lv := gui.Add("ListView", "x20 y40 w730 h320 Grid -Multi NoSortHdr +LV0x10000 +HScroll +VScroll", ["Name", "Icon", "Hotkey", "Path"])
     
     if (currentTheme = "dark") {
         lv.Opt("+Background333333 cWhite")
@@ -1853,38 +2037,43 @@ CreateLauncherTab(gui, tabs) {
     }
     
     totalWidth := 730
-    nameWidth := 150
-    hotkeyWidth := 150
-    pathWidth := totalWidth - nameWidth - hotkeyWidth - 4
+    nameWidth := 180
+    iconWidth := 80
+    hotkeyWidth := 140
+    pathWidth := totalWidth - nameWidth - iconWidth - hotkeyWidth - 6
     
     lv.ModifyCol(1, nameWidth)
-    lv.ModifyCol(2, hotkeyWidth)
-    lv.ModifyCol(3, pathWidth)
+    lv.ModifyCol(2, iconWidth)
+    lv.ModifyCol(3, hotkeyWidth)
+    lv.ModifyCol(4, pathWidth)
     
     LoadLaunchersToListViewTab(lv)
     
     gui.Add("Text", "x20 y380 w100 c" (currentTheme = "dark" ? "White" : "Black"), "🏷️ Name:")
     nameInput := gui.Add("Edit", "x120 y380 w200 h23 vLauncherName " (currentTheme = "dark" ? "Background333333 cWhite" : "BackgroundF0F0F0"), "")
     
-    gui.Add("Text", "x20 y410 w100 c" (currentTheme = "dark" ? "White" : "Black"), "⌨️ Hotkey:")
-    hotkeyInput := gui.Add("Hotkey", "x120 y410 w200 vLauncherHotkey")
-    helpText := gui.Add("Link", "x+10 y413 w20 h20 -TabStop", '<a href="#">?</a>')
+    gui.Add("Text", "x20 y410 w100 c" (currentTheme = "dark" ? "White" : "Black"), "🎯 Icon:")
+    iconInput := gui.Add("Edit", "x120 y410 w200 h23 vLauncherIcon " (currentTheme = "dark" ? "Background333333 cWhite" : "BackgroundF0F0F0"), defaultLauncherIcon)
+    
+    gui.Add("Text", "x20 y440 w100 c" (currentTheme = "dark" ? "White" : "Black"), "⌨️ Hotkey:")
+    hotkeyInput := gui.Add("Hotkey", "x120 y440 w200 vLauncherHotkey")
+    helpText := gui.Add("Link", "x+10 y443 w20 h20 -TabStop", '<a href="#">?</a>')
     helpText.SetFont("bold s10 underline c" (currentTheme = "dark" ? "0x98FB98" : "Blue"), "Segoe UI")
     helpText.OnEvent("Click", ShowLauncherHotkeyTooltip)
     
     gui.OnEvent("Escape", (*) => hotkeyInput.Value := "")
 
-    gui.Add("Text", "x20 y440 w100 c" (currentTheme = "dark" ? "White" : "Black"), "📂 Path:")
-    pathInput := gui.Add("Edit", "x120 y440 w500 h23 vLauncherPath " (currentTheme = "dark" ? "Background333333 cWhite" : "BackgroundF0F0F0"), "")
-    browseBtn := gui.Add("Button", "x630 y438 w100", "Browse")
-    singleInstanceChk := gui.Add("Checkbox", "x120 y470 vSingleInstance c" (currentTheme = "dark" ? "White" : "Black"), "Switch to Running Instance")
+    gui.Add("Text", "x20 y470 w100 c" (currentTheme = "dark" ? "White" : "Black"), "📂 Path:")
+    pathInput := gui.Add("Edit", "x120 y470 w500 h23 vLauncherPath " (currentTheme = "dark" ? "Background333333 cWhite" : "BackgroundF0F0F0"), "")
+    browseBtn := gui.Add("Button", "x630 y468 w100", "Browse")
+    singleInstanceChk := gui.Add("Checkbox", "x120 y500 vSingleInstance c" (currentTheme = "dark" ? "White" : "Black"), "Switch to Running Instance")
     
     ; add tooltip on hover
     AddControlTooltip(singleInstanceChk, "If checked, the launcher will switch to the already running `ninstance instead of opening a new one.")
 
-    addBtn := gui.Add("Button", "x120 y500 w100", "Add")
-    editBtn := gui.Add("Button", "x230 y500 w100", "Edit")
-    deleteBtn := gui.Add("Button", "x340 y500 w100", "Delete")
+    addBtn := gui.Add("Button", "x120 y530 w100", "Add")
+    editBtn := gui.Add("Button", "x230 y530 w100", "Edit")
+    deleteBtn := gui.Add("Button", "x340 y530 w100", "Delete")
     
     if (currentTheme = "dark") {
         browseBtn.SetColor("0x333333", "ffffff", -1, "555555", 9)
@@ -1995,7 +2184,11 @@ LoadLaunchersToListViewTab(lv) {
                 path := parts[2]
                 name := IniRead(launcherIniPath, "Names", hotkey, hotkey)
                 readableHotkey := FormatHotkey(hotkey)
-                lv.Add(, name, readableHotkey, path)
+                iconEncoded := IniRead(launcherIniPath, "Icons", hotkey, "")
+                icon := DecodeLauncherIcon(iconEncoded)
+                if (icon = "" || icon = "??")
+                    icon := defaultLauncherIcon
+                lv.Add(, name, icon, readableHotkey, path)
             }
         }
     }
@@ -2004,10 +2197,16 @@ LoadLaunchersToListViewTab(lv) {
 AddLauncherFromTab(*) {
     global unifiedGui, launcherIniPath
     
-    nameInput := unifiedGui["LauncherName"].Value
+    nameInput := Trim(unifiedGui["LauncherName"].Value)
+    iconInput := Trim(unifiedGui["LauncherIcon"].Value)
     hotkeyInput := unifiedGui["LauncherHotkey"].Value
-    pathInput := unifiedGui["LauncherPath"].Value
+    pathInput := Trim(unifiedGui["LauncherPath"].Value)
     singleInstance := unifiedGui["SingleInstance"].Value ? "1" : "0"
+    
+    if (iconInput = "")
+        iconInput := defaultLauncherIcon
+    iconInput := StrReplace(iconInput, "`n")
+    iconEncoded := EncodeLauncherIcon(iconInput)
     
     if (nameInput = "" || hotkeyInput = "" || pathInput = "") {
         ShowNotification("❌ Please fill in all fields")
@@ -2039,10 +2238,12 @@ AddLauncherFromTab(*) {
     IniWrite(pathInput, launcherIniPath, "Launchers", hotkeyInput)
     IniWrite(nameInput, launcherIniPath, "Names", hotkeyInput)
     IniWrite(singleInstance, launcherIniPath, "SingleInstance", hotkeyInput)
+    IniWrite(iconEncoded, launcherIniPath, "Icons", hotkeyInput)
     
     CreateLauncherHotkey(hotkeyInput, pathInput)
     
     unifiedGui["LauncherName"].Value := ""
+    unifiedGui["LauncherIcon"].Value := defaultLauncherIcon
     unifiedGui["LauncherHotkey"].Value := ""
     unifiedGui["LauncherPath"].Value := ""
     unifiedGui["SingleInstance"].Value := false
@@ -2074,8 +2275,9 @@ EditLauncherFromTab(*) {
         isLauncherEditGuiOpen := true
         
         oldName := lv.GetText(rowNum, 1)
-        readableHotkey := lv.GetText(rowNum, 2)
-        oldPath := lv.GetText(rowNum, 3)
+        listIcon := lv.GetText(rowNum, 2)
+        readableHotkey := lv.GetText(rowNum, 3)
+        oldPath := lv.GetText(rowNum, 4)
         
         hotkeyParts := StrSplit(readableHotkey, " + ")
         oldHotkey := ""
@@ -2094,6 +2296,15 @@ EditLauncherFromTab(*) {
             }
         }
         
+        iconEncoded := IniRead(launcherIniPath, "Icons", oldHotkey, "")
+        if (iconEncoded != "") {
+            oldIcon := DecodeLauncherIcon(iconEncoded)
+        } else if (listIcon != "" && listIcon != "??") {
+            oldIcon := listIcon
+        } else {
+            oldIcon := defaultLauncherIcon
+        }
+        
         ; load the SingleInstance setting
         oldSingleInstance := IniRead(launcherIniPath, "SingleInstance", oldHotkey, "0")
         
@@ -2109,22 +2320,25 @@ EditLauncherFromTab(*) {
         editGui.Add("Text", "x10 y10 w100 c" (currentTheme = "dark" ? "White" : "Black"), "🏷️ Name:")
         editNameInput := editGui.Add("Edit", "x110 y10 w200 h23 " (currentTheme = "dark" ? "Background333333 cWhite" : "BackgroundF0F0F0"), oldName)
         
-        editGui.Add("Text", "x10 y40 w100 c" (currentTheme = "dark" ? "White" : "Black"), "⌨️ Hotkey:")
-        editHotkeyInput := editGui.Add("Hotkey", "x110 y40 w200", oldHotkey)
+        editGui.Add("Text", "x10 y40 w100 c" (currentTheme = "dark" ? "White" : "Black"), "🎯 Icon:")
+        editIconInput := editGui.Add("Edit", "x110 y40 w200 h23 " (currentTheme = "dark" ? "Background333333 cWhite" : "BackgroundF0F0F0"), oldIcon)
+        
+        editGui.Add("Text", "x10 y70 w100 c" (currentTheme = "dark" ? "White" : "Black"), "⌨️ Hotkey:")
+        editHotkeyInput := editGui.Add("Hotkey", "x110 y70 w200", oldHotkey)
         
         editGui.OnEvent("Escape", (*) => editHotkeyInput.Value := "")
 
-        editGui.Add("Text", "x10 y70 w100 c" (currentTheme = "dark" ? "White" : "Black"), "📂 Path:")
-        editPathInput := editGui.Add("Edit", "x110 y70 w400 h23 " (currentTheme = "dark" ? "Background333333 cWhite" : "BackgroundF0F0F0"), oldPath)
-        editBrowseBtn := editGui.Add("Button", "x520 y68 w100", "Browse")
+        editGui.Add("Text", "x10 y100 w100 c" (currentTheme = "dark" ? "White" : "Black"), "📂 Path:")
+        editPathInput := editGui.Add("Edit", "x110 y100 w400 h23 " (currentTheme = "dark" ? "Background333333 cWhite" : "BackgroundF0F0F0"), oldPath)
+        editBrowseBtn := editGui.Add("Button", "x520 y98 w100", "Browse")
         
         ; add SingleInstance checkbox
-        editSingleInstanceChk := editGui.Add("Checkbox", "x110 y100 c" (currentTheme = "dark" ? "White" : "Black"), "Switch to Running Instance")
+        editSingleInstanceChk := editGui.Add("Checkbox", "x110 y130 c" (currentTheme = "dark" ? "White" : "Black"), "Switch to Running Instance")
         editSingleInstanceChk.Value := (oldSingleInstance = "1")
         AddControlTooltip(editSingleInstanceChk, "If checked, the launcher will switch to the already running `ninstance instead of opening a new one.")
 
-        saveBtn := editGui.Add("Button", "x420 y140 w100", "Save")
-        cancelBtn := editGui.Add("Button", "x530 y140 w100", "Cancel")
+        saveBtn := editGui.Add("Button", "x420 y180 w100", "Save")
+        cancelBtn := editGui.Add("Button", "x530 y180 w100", "Cancel")
         
         SafeStyleButton(editBrowseBtn, currentTheme = "dark")
         SafeStyleButton(saveBtn, currentTheme = "dark")
@@ -2177,15 +2391,22 @@ EditLauncherFromTab(*) {
             newHotkey := editHotkeyInput.Value
             newPath := editPathInput.Value
             newName := editNameInput.Value
+            newIcon := Trim(editIconInput.Value)
+            if (newIcon = "")
+                newIcon := defaultLauncherIcon
+            newIcon := StrReplace(newIcon, "`n")
+            newIconEncoded := EncodeLauncherIcon(newIcon)
             newSingleInstance := editSingleInstanceChk.Value ? "1" : "0"
             
             IniDelete(launcherIniPath, "Launchers", oldHotkey)
             IniDelete(launcherIniPath, "Names", oldHotkey)
             IniDelete(launcherIniPath, "SingleInstance", oldHotkey)
+            IniDelete(launcherIniPath, "Icons", oldHotkey)
             
             IniWrite(newPath, launcherIniPath, "Launchers", newHotkey)
             IniWrite(newName, launcherIniPath, "Names", newHotkey)
             IniWrite(newSingleInstance, launcherIniPath, "SingleInstance", newHotkey)
+            IniWrite(newIconEncoded, launcherIniPath, "Icons", newHotkey)
             
             CleanupEditLauncherGui()
             
@@ -2218,7 +2439,7 @@ EditLauncherFromTab(*) {
         cancelBtn.OnEvent("Click", CleanupEditLauncherGui)
         editGui.OnEvent("Close", CleanupEditLauncherGui)
         
-        editGui.Show("w640 h180 Center")
+        editGui.Show("w640 h220 Center")
     } catch Error as err {
         isLauncherEditGuiOpen := false
         ShowNotification("❌ Error: " err.Message)
@@ -2236,7 +2457,7 @@ DeleteLauncherFromTab(*) {
         }
         
         name := lv.GetText(rowNum, 1)
-        readableHotkey := lv.GetText(rowNum, 2)
+        readableHotkey := lv.GetText(rowNum, 3)
         
         hotkeyParts := StrSplit(readableHotkey, " + ")
         ahkHotkey := ""
@@ -2263,6 +2484,7 @@ DeleteLauncherFromTab(*) {
         IniDelete(launcherIniPath, "Launchers", ahkHotkey)
         IniDelete(launcherIniPath, "Names", ahkHotkey)
         IniDelete(launcherIniPath, "SingleInstance", ahkHotkey)
+        IniDelete(launcherIniPath, "Icons", ahkHotkey)
         
         LoadLaunchersToListViewTab(lv)
         
@@ -2274,6 +2496,7 @@ DeleteLauncherFromTab(*) {
 
 CreateSettingsTab(gui, tabs) {
     global currentTheme, settingsFile, notificationsEnabled, currentVersion, animationsEnabled
+    global notificationTextAlign, notificationStackMode, notificationWidth, notificationWidthApplyBtn
     
     tabs.UseTab(4)
     
@@ -2317,6 +2540,33 @@ CreateSettingsTab(gui, tabs) {
     notifyChk := gui.Add("Checkbox", "x" (leftColX+20) " y320 vEnableNotifications", "Enable notifications")
     notifyChk.Value := notificationsEnabled
     notifyChk.OnEvent("Click", ToggleNotificationsFromSettings)
+    
+    gui.Add("Text", "x" (leftColX+20) " y350", "Text alignment")
+    textAlignDdl := gui.Add("DropDownList", "x" (leftColX+20) " y372 w220 vNotificationTextAlignChoice", ["Left", "Center"])
+    textAlignDdl.Choose(notificationTextAlign = "center" ? 2 : 1)
+    textAlignDdl.OnEvent("Change", NotificationTextAlignChanged)
+    
+    gui.Add("Text", "x" (leftColX+20) " y410", "Notification width")
+    widthEdit := gui.Add("Edit", "x" (leftColX+20) " y432 w80 Number Limit3 vNotificationWidthInput", notificationWidth)
+    widthEdit.SetFont("c0x000000")
+    widthEdit.OnEvent("Focus", NotificationWidthInputFocused)
+    widthEdit.OnEvent("LoseFocus", NotificationWidthLoseFocus)
+    notificationWidthApplyBtn := gui.Add("Button", "x0 y0 w0 h0 Hidden", "Apply Width")
+    notificationWidthApplyBtn.OnEvent("Click", ApplyNotificationWidth)
+    
+    gui.Add("Text", "x" (leftColX+20) " y470", "When multiple notifications appear")
+    stackModeDdl := gui.Add("DropDownList", "x" (leftColX+20) " y492 w220 vNotificationStackModeChoice", ["Stack downward", "Overlay same spot"])
+    stackModeDdl.Choose(notificationStackMode = "overlay" ? 2 : 1)
+    stackModeDdl.OnEvent("Change", NotificationStackModeChanged)
+    
+    setNotifyPosBtn := gui.Add("Button", "x" (leftColX+20) " y530 w220 h28", "Set notification position")
+
+    if (currentTheme = "dark") {
+        setNotifyPosBtn.SetColor("0x333333", "ffffff", -1, "555555", 9)
+    } else {
+        setNotifyPosBtn.SetColor("ffffff", "0x333333", -1, "CCCCCC", 9)
+    }
+    setNotifyPosBtn.OnEvent("Click", ShowNotificationPositionPreview)
     
     rightColX := 400
     
@@ -2368,14 +2618,14 @@ CreateSettingsTab(gui, tabs) {
     checkUpdateBtn.OnEvent("Click", (*) => CheckForUpdates(true))
     
     gui.SetFont("s10 bold c" (currentTheme = "dark" ? "0xFFFFFF" : "0x000000"), "Segoe UI")
-    gui.Add("Text", "x" leftColX " y360 w200", "About")
+    gui.Add("Text", "x" rightColX " y310 w200", "About")
     
     gui.SetFont("s10 c" (currentTheme = "dark" ? "0xFFFFFF" : "0x000000"), "Segoe UI")
-    gui.Add("Text", "x" (leftColX+20) " y390", "[#] Current Version: " currentVersion)
+    gui.Add("Text", "x" (rightColX+20) " y340", "[#] Current Version: " currentVersion)
     
     gui.SetFont("s10", "Segoe UI")
     linkColor := currentTheme = "dark" ? "cWhite" : "cBlue"
-    githubLink := gui.Add("Link", "x" (leftColX+20) " y420 w300 -TabStop " linkColor, 
+    githubLink := gui.Add("Link", "x" (rightColX+20) " y370 w300 -TabStop " linkColor, 
         '<a href="https://github.com/fr0st-iwnl/WinMacros">GitHub Repository</a> | <a href="https://winmacros.netlify.app/">Website</a>')
 }
 
@@ -2431,6 +2681,277 @@ ToggleNotificationsFromSettings(ctrl, *) {
     } else {
         A_TrayMenu.Uncheck("Enable Notifications")
     }
+}
+
+NotificationStackModeChanged(ctrl, *) {
+    global notificationStackMode, settingsFile
+    global unifiedGui
+    
+    selectedText := ""
+    try selectedText := ctrl.Text
+    selectedText := StrLower(selectedText)
+    if (selectedText = "")
+        selectedText := StrLower(ctrl.Value)
+    if (selectedText = "2")
+        selectedText := "overlay same spot"
+    else if (selectedText = "1")
+        selectedText := "stack downward"
+    
+    value := selectedText = "overlay same spot" ? "overlay" : "stack"
+    
+    notificationStackMode := value
+    IniWrite(notificationStackMode, settingsFile, "Settings", "NotificationStackMode")
+    
+    ShowNotification(notificationStackMode = "overlay"
+        ? "📍 Notifications will reuse the same spot"
+        : "📍 Notifications will stack downward")
+    
+    if (IsObject(unifiedGui) && unifiedGui.HasProp("NotificationStackModeChoice")) {
+        ddl := unifiedGui["NotificationStackModeChoice"]
+        if (ddl != ctrl)
+            ddl.Choose(notificationStackMode = "overlay" ? 2 : 1)
+    }
+}
+
+NotificationTextAlignChanged(ctrl, *) {
+    global notificationTextAlign, settingsFile
+    global unifiedGui
+    
+    selectedText := ""
+    try selectedText := ctrl.Text
+    selectedText := StrLower(selectedText)
+    if (selectedText = "")
+        selectedText := StrLower(ctrl.Value)
+    if (selectedText = "2")
+        selectedText := "center"
+    else if (selectedText = "1")
+        selectedText := "left"
+    
+    notificationTextAlign := selectedText = "center" ? "center" : "left"
+    IniWrite(notificationTextAlign, settingsFile, "Settings", "NotificationTextAlign")
+    ShowNotification(notificationTextAlign = "center"
+        ? "📍 Notification text centered"
+        : "📍 Notification text left aligned")
+    
+    if (IsObject(unifiedGui) && unifiedGui.HasProp("NotificationTextAlignChoice")) {
+        ddl := unifiedGui["NotificationTextAlignChoice"]
+        if (ddl != ctrl)
+            ddl.Choose(notificationTextAlign = "center" ? 2 : 1)
+    }
+}
+
+NotificationWidthChanged(ctrl, *) {
+    global notificationWidth, settingsFile
+    global unifiedGui
+
+    value := Trim(ctrl.Value)
+    if (value = "") {
+        ctrl.Value := notificationWidth
+        return
+    }
+
+    if !RegExMatch(value, "^\d+$") {
+        ctrl.Value := notificationWidth
+        return
+    }
+    
+    newWidth := value + 0
+    if (newWidth < 220)
+        newWidth := 220
+    else if (newWidth > 600)
+        newWidth := 600
+    
+    if (newWidth = notificationWidth) {
+        ctrl.Value := notificationWidth
+        return
+    }
+    
+    notificationWidth := newWidth
+    IniWrite(notificationWidth, settingsFile, "Settings", "NotificationWidth")
+    ctrl.Value := notificationWidth
+    ShowNotification("📐 Notification width set to " notificationWidth "px")
+    
+    if (IsObject(unifiedGui) && unifiedGui.HasProp("NotificationWidthInput")) {
+        widthCtrl := unifiedGui["NotificationWidthInput"]
+        if (widthCtrl != ctrl)
+            widthCtrl.Value := notificationWidth
+    }
+}
+
+NotificationWidthInputFocused(ctrl, *) {
+    global notificationWidthApplyBtn
+    if (IsObject(notificationWidthApplyBtn))
+        notificationWidthApplyBtn.Opt("+Default")
+}
+
+ApplyNotificationWidth(btn, *) {
+    global unifiedGui
+    try {
+        ctrl := unifiedGui["NotificationWidthInput"]
+        if (IsObject(ctrl))
+            NotificationWidthChanged(ctrl)
+    }
+}
+
+NotificationWidthLoseFocus(ctrl, *) {
+    NotificationWidthChanged(ctrl)
+    global notificationWidthApplyBtn
+    if (IsObject(notificationWidthApplyBtn))
+        notificationWidthApplyBtn.Opt("-Default")
+}
+
+ShowNotificationPositionPreview(*) {
+    global notificationPreviewGui, notificationPreviewMenu
+    global currentTheme, notificationPosX, notificationPosY, notificationWidth, notificationTextAlign
+    
+    try {
+        if (IsObject(notificationPreviewGui))
+            notificationPreviewGui.Destroy()
+    }
+    
+    notificationPreviewGui := Gui("-Caption +AlwaysOnTop +ToolWindow")
+    notificationPreviewGui.BackColor := currentTheme = "dark" ? "1A1A1A" : "F0F0F0"
+    notificationPreviewGui.SetFont("s10", "Segoe UI")
+    
+    textColor := currentTheme = "dark" ? "0xFFFFFF" : "0x000000"
+    previewMessage := "Drag this, then right-click for options."
+    
+    width := notificationWidth
+    rows := 0
+    wrappedPreview := WrapNotificationMessage(previewMessage, width, &rows)
+    height := CalculateNotificationHeight(rows)
+    
+    textWidth := width - 20
+    if (textWidth < 60)
+        textWidth := 60
+    
+    textOptions := "x10 y10 w" . textWidth . " r" . rows . " c" . textColor
+    if (notificationTextAlign = "center")
+        textOptions .= " Center"
+    
+    previewText := notificationPreviewGui.Add("Text", textOptions, wrappedPreview)
+    previewText.OnEvent("Click", StartNotificationPreviewDrag)
+    previewText.OnEvent("ContextMenu", ShowNotificationPreviewMenu)
+    
+    notificationPreviewGui.OnEvent("Close", CancelNotificationPositionPreview)
+    notificationPreviewGui.OnEvent("Escape", CancelNotificationPositionPreview)
+    notificationPreviewGui.OnEvent("ContextMenu", ShowNotificationPreviewMenu)
+    
+    margin := 20
+    MonitorGet(, &left, &top, &right, &bottom)
+    startX := notificationPosX != "" ? notificationPosX : right - width - margin
+    startY := notificationPosY != "" ? notificationPosY : top + margin
+    ClampNotificationPosition(&startX, &startY, width, height, margin)
+    
+    notificationPreviewGui.Show(Format("x{1} y{2} w{3} h{4}", startX, startY, width, height))
+}
+
+StartNotificationPreviewDrag(ctrl, *) {
+    gui := ""
+    try gui := ctrl.Gui
+    if (!IsObject(gui))
+        gui := ctrl
+    
+    if (!IsObject(gui))
+        return
+    
+    DllCall("User32\ReleaseCapture")
+    PostMessage(0xA1, 2, 0, , "ahk_id " gui.Hwnd)
+}
+
+ShowNotificationPreviewMenu(*) {
+    global notificationPreviewMenu, notificationPreviewGui
+    global suppressNotificationPreviewMenu
+    if (suppressNotificationPreviewMenu) {
+        suppressNotificationPreviewMenu := false
+        return
+    }
+    
+    if (!IsObject(notificationPreviewGui))
+        return
+    
+    if (!IsObject(notificationPreviewMenu)) {
+        notificationPreviewMenu := Menu()
+        notificationPreviewMenu.Add("Save position", SaveNotificationPosition)
+        notificationPreviewMenu.Add("Reset to default position", ResetNotificationPosition)
+        notificationPreviewMenu.Add("Cancel", CancelNotificationPositionPreview)
+    }
+    
+    notificationPreviewMenu.Show()
+}
+
+SaveNotificationPosition(*) {
+    global notificationPreviewGui, notificationPreviewMenu
+    global notificationPosX, notificationPosY, settingsFile
+    global suppressNotificationPreviewMenu
+    
+    if (!IsObject(notificationPreviewGui))
+        return
+    
+    notificationPreviewGui.GetPos(&x, &y, &w, &h)
+    ClampNotificationPosition(&x, &y, w, h)
+    
+    notificationPosX := Round(x)
+    notificationPosY := Round(y)
+    
+    IniWrite(notificationPosX, settingsFile, "Settings", "NotificationPosX")
+    IniWrite(notificationPosY, settingsFile, "Settings", "NotificationPosY")
+    
+    notificationPreviewGui.Destroy()
+    notificationPreviewGui := ""
+    if (IsObject(notificationPreviewMenu))
+        notificationPreviewMenu := ""
+    suppressNotificationPreviewMenu := true
+
+    ShowNotification("📍 Notification position saved")
+}
+
+CancelNotificationPositionPreview(*) {
+    global notificationPreviewGui, notificationPreviewMenu
+    global suppressNotificationPreviewMenu
+    
+    if (IsObject(notificationPreviewGui)) {
+        notificationPreviewGui.Destroy()
+        notificationPreviewGui := ""
+    }
+    
+    if (IsObject(notificationPreviewMenu)) {
+        notificationPreviewMenu := ""
+    }
+    suppressNotificationPreviewMenu := true
+}
+
+ResetNotificationPosition(*) {
+    global notificationPreviewGui, notificationPosX, notificationPosY, settingsFile
+    global notificationWidth, notificationPreviewMenu, suppressNotificationPreviewMenu
+    
+    if (!IsObject(notificationPreviewGui))
+        return
+    
+    notificationPreviewGui.GetPos(&x, &y, &w, &h)
+    if (w <= 0)
+        w := notificationWidth
+    if (h <= 0)
+        h := 35
+    
+    margin := 20
+    MonitorGet(, &left, &top, &right, &bottom)
+    defaultX := right - notificationWidth - margin
+    defaultY := top + margin
+    
+    ClampNotificationPosition(&defaultX, &defaultY, notificationWidth, h, margin)
+    
+    notificationPosX := Round(defaultX)
+    notificationPosY := Round(defaultY)
+    notificationPreviewGui.Move(notificationPosX, notificationPosY)
+    IniWrite(notificationPosX, settingsFile, "Settings", "NotificationPosX")
+    IniWrite(notificationPosY, settingsFile, "Settings", "NotificationPosY")
+    
+    ; Close menu after reset so it doesn't linger
+    if (IsObject(notificationPreviewMenu))
+        notificationPreviewMenu := ""
+    suppressNotificationPreviewMenu := true
+    ShowNotification("📍 Notification position reset")
 }
 
 ToggleAnimationsFromSettings(ctrl, *) {
