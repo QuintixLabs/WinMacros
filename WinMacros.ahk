@@ -114,7 +114,7 @@ global hotkeyActions := Map(
 
 global settingsFile := EnvGet("LOCALAPPDATA") "\WinMacros\settings.ini"
 
-global currentVersion := "1.9"
+global currentVersion := "2.0"
 global versionCheckUrl := "https://winmacros.netlify.app/version/version.txt"
 global githubReleasesUrl := "https://github.com/fr0st-iwnl/WinMacros/releases/latest"
 
@@ -1337,8 +1337,20 @@ FindInPath(filename) {
 }
 
 OpenCalculator(*) {
-    Run("calc.exe")
-    ShowNotification("🧠 Opening Calculator")
+    ; Try to find calculator window by title (more reliable)
+    if (WinExist("Calculator ahk_exe CalculatorApp.exe") || WinExist("Calculator ahk_exe ApplicationFrameHost.exe")) {
+        ; Toggle behavior: if active, minimize; if not active, activate
+        if (WinActive("Calculator ahk_exe CalculatorApp.exe") || WinActive("Calculator ahk_exe ApplicationFrameHost.exe")) {
+            WinMinimize
+            ShowNotification("➖ Minimized Calculator")
+        } else {
+            WinActivate
+            ShowNotification("🧠 Switching to Calculator")
+        }
+    } else {
+        Run("calc.exe")
+        ShowNotification("🧠 Opening Calculator")
+    }
 }
 
 ResetAllHotkeys(gui) {
@@ -1556,8 +1568,14 @@ FormatHotkey(hotkeyStr) {
 
 OpenSpotify(*) {
     if (WinExist("ahk_exe spotify.exe")) {
-        WinActivate
-        ShowNotification("🎵 Switching to Spotify")
+        ; Toggle behavior: if active, minimize; if not active, activate
+        if WinActive("ahk_exe spotify.exe") {
+            WinMinimize
+            ShowNotification("➖ Minimized Spotify")
+        } else {
+            WinActivate
+            ShowNotification("🎵 Switching to Spotify")
+        }
         return
     }
     
@@ -1761,9 +1779,16 @@ CreateLauncherHotkey(hotkeyStr, path) {
 LaunchOrActivate(appPath, exeName, appName, singleInstance := 0, icon := "") {
     ; Check if single instance mode is enabled
     if (singleInstance = "1" && WinExist("ahk_exe " exeName)) {
-        ; Application is running and single instance mode is on, activate it
-        WinActivate
-        ShowNotification("🔄 Switching to " appName)
+        ; Check if the window is already active
+        if WinActive("ahk_exe " exeName) {
+            ; If active, minimize it (toggle behavior)
+            WinMinimize
+            ShowNotification("➖ Minimized " appName)
+        } else {
+            ; If not active, activate it
+            WinActivate
+            ShowNotification("🔄 Switching to " appName)
+        }
     } else {
         ; Either not running, or multiple instances allowed - launch new instance
         try {
